@@ -294,13 +294,21 @@ export const api = {
   },
 
   getWorkItemActivity: async (id: string, page = 1, limit = 20) => {
-    const res = await request<{
-      activities: ActivityLog[];
-      pagination: Pagination;
-    }>(`/api/v1/work-items/${id}/activity`, {
+    const res = await request<ActivityLog[]>(`/api/v1/work-items/${id}/activity`, {
       params: { page, limit },
     });
-    return res.data;
+    const activities = Array.isArray(res.data)
+      ? res.data
+      : (res.data as unknown as { activities?: ActivityLog[] })?.activities || [];
+    return {
+      activities,
+      pagination: res.pagination || {
+        page,
+        limit,
+        totalItems: activities.length,
+        totalPages: 1,
+      },
+    };
   },
 
   getWorkItemComments: async (id: string) => {

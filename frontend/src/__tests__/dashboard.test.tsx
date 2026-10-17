@@ -218,12 +218,10 @@ describe('DashboardPage Component', () => {
 
     renderDashboard();
 
-    await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/network connectivity lost/i);
-    });
+    const retryBtn = await screen.findByRole('button', { name: /retry/i });
+    expect(screen.getByRole('alert')).toHaveTextContent(/network connectivity lost/i);
 
     errorSpy.mockResolvedValue(mockDashboardData);
-    const retryBtn = screen.getByRole('button', { name: /retry/i });
     fireEvent.click(retryBtn);
 
     await waitFor(() => {

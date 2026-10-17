@@ -87,10 +87,10 @@ npm run dev:frontend
 
 ### Run Test Suites
 ```bash
-# Run both test suites
+# Run both test suites (105 passing tests across 15 files)
 npm test
 
-# Run backend test suite (79 tests across 9 test files)
+# Run backend test suite (84 tests across 10 test files)
 npm run test:backend
 
 # Run frontend test suite (21 tests across 5 test files)
@@ -105,25 +105,30 @@ npm run build
 
 ---
 
-## 🏛 Architecture Highlights
+## 🔧 Troubleshooting Guidance
 
-1. **Dashboard APIs (`GET /api/v1/dashboard`)**:
-   - Aggregates operational focus queues: **Assigned to Me**, **Unassigned Urgent**, **Awaiting Approval**, and **Overdue Work Items**.
-   - Team-scoped IDOR prevention: Caller can only access metrics for teams they belong to.
-   - Database-level aggregations via Prisma `$transaction` and `groupBy` without loading entire datasets into browser memory.
+### 1. Database Connection Failed (`P1001` or `ECONNREFUSED`)
+- Ensure PostgreSQL is running: `brew services status postgresql@16` or `pg_isready`.
+- Verify credentials and port 5432 in `backend/.env`.
+- Ensure database exists: `createdb opsflow`.
 
-2. **Optimistic Concurrency Control (OCC)**:
-   - Every work item tracks an integer `version`.
-   - Modifying fields or triggering workflow transitions validates the last-read version.
-   - On mismatch, backend returns `409 Conflict`.
-   - Frontend displays a prominent warning callout with an immediate **"Refresh Latest Version"** action button.
+### 2. Port Conflict (`EADDRINUSE: 5001` or `5173`)
+- Check which process occupies port 5001: `lsof -i :5001`.
+- Terminate stale node process: `kill -9 <PID>` or update `PORT=5002` in `backend/.env`.
+- Frontend Vite automatically tries 5173 then next free port (or specify `--port 5174`).
 
-3. **Workflow State Machine & Separation of Duties**:
-   - Strict transition rules: `OPEN → IN_PROGRESS → AWAITING_APPROVAL → RESOLVED → CLOSED`.
-   - Rejections require a stated reason (minimum 3 characters) and return ticket to `IN_PROGRESS`.
-   - **Separation of Duties**: Leads and Admins cannot approve tickets assigned to themselves; an independent Lead/Admin must review and approve.
+### 3. Prisma Migrations Desynchronized
+- Re-run migrations safely: `npm run db:migrate`.
+- Re-seed initial personas and operations queues: `npm run db:seed`.
 
-4. **Transactional Idempotency**:
-   - `POST /api/v1/work-items` accepts an `Idempotency-Key` header.
-   - Retries with identical payload return cached response (`X-Cache-Lookup: HIT`).
-   - Retries with conflicting payload return `422 Unprocessable Entity`.
+### 4. JWT Expiration / Unauthorized (401)
+- If the browser session expires, the client clears `sessionStorage` and redirects to `/login`.
+- Click any of the 6 demo personas to instantly refresh credentials.
+
+---
+
+## 📚 Detailed Documentation
+
+- **[ENGINEERING_DECISIONS.md](./ENGINEERING_DECISIONS.md)**: Deep dive into architectural decisions, OCC locking, atomic claiming, idempotency engine, RBAC, and trade-offs.
+- **[docs/ARCHITECTURE_SPEC.md](./docs/ARCHITECTURE_SPEC.md)**: Exhaustive API contracts, JSON schemas, workflow state transitions, and database models.
+

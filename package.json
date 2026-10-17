@@ -8,9 +8,12 @@
     "frontend"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=backend & npm run dev --workspace=frontend",
+    "dev": "concurrently -k -p \"[{name}]\" -n \"BACKEND,FRONTEND\" -c \"blue.bold,green.bold\" \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "build:backend": "npm run build --workspace=backend",
+    "build:frontend": "npm run build --workspace=frontend",
     "test": "npm run test --workspace=backend && npm run test --workspace=frontend",
     "test:backend": "npm run test --workspace=backend",
     "test:frontend": "npm run test --workspace=frontend",

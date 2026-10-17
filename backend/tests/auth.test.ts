@@ -141,6 +141,36 @@ describe('Authentication API (/api/v1/auth)', () => {
       expect(res.body.error.message).toContain('Authentication token has expired');
     });
 
+    it('returns 401 when token was signed with an untrusted or forged secret', async () => {
+      const forgedToken = jwt.sign(
+        { userId: 'admin-id', email: 'admin@opsflow.io' },
+        'untrusted-attacker-secret-key-32chars',
+        { algorithm: 'HS256', expiresIn: '1h' }
+      );
+
+      const res = await request(app)
+        .get('/api/v1/auth/me')
+        .set('Authorization', `Bearer ${forgedToken}`);
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.message).toBe('Invalid authentication token');
+    });
+
+    it('returns 401 when token payload is missing required identity claims', async () => {
+      const emptyPayloadToken = jwt.sign(
+        { someOtherField: 'value' },
+        env.JWT_SECRET,
+        { algorithm: 'HS256', expiresIn: '1h' }
+      );
+
+      const res = await request(app)
+        .get('/api/v1/auth/me')
+        .set('Authorization', `Bearer ${emptyPayloadToken}`);
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.message).toContain('missing required identity claims');
+    });
+
     it('returns 200, user identity, and team memberships for a valid token', async () => {
       // Login first
       const loginRes = await request(app)

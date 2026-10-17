@@ -25,7 +25,7 @@ import { TypeBadge } from '../components/common/TypeBadge';
 import { CreateWorkItemModal } from '../components/work-items/CreateWorkItemModal';
 
 export const DashboardPage: React.FC = () => {
-  const { activeTeam, userRoleInActiveTeam } = useAuth();
+  const { activeTeam, userRoleInActiveTeam, loading: authLoading } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,8 +52,10 @@ export const DashboardPage: React.FC = () => {
   }, [activeTeam]);
 
   useEffect(() => {
-    fetchDashboard();
-  }, [fetchDashboard]);
+    if (!authLoading) {
+      fetchDashboard();
+    }
+  }, [fetchDashboard, authLoading]);
 
   const handleClaim = async (itemId: string, version: number) => {
     try {
@@ -72,7 +74,7 @@ export const DashboardPage: React.FC = () => {
 
   const isViewer = userRoleInActiveTeam === 'VIEWER';
 
-  if (loading && !data) {
+  if ((loading || authLoading) && !data && !error) {
     return <LoadingSpinner message="Calculating operational metrics and active queues..." />;
   }
 

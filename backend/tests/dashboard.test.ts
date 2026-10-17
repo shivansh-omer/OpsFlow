@@ -76,8 +76,8 @@ describe('Dashboard Operations API (/api/v1/dashboard)', () => {
   });
 
   it('correctly includes overdue items (due date in past and status not resolved/closed)', async () => {
-    // Create an explicit overdue item in platformTeam
-    const pastDueDate = new Date(Date.now() - 48 * 3600 * 1000); // 2 days ago
+    // Create an explicit overdue item in platformTeam with earliest due date to guarantee top-5 inclusion
+    const pastDueDate = new Date('2020-01-01T00:00:00Z');
     const overdueItem = await prisma.workItem.create({
       data: {
         title: 'Overdue Certificate Expiry Warning',
@@ -92,15 +92,19 @@ describe('Dashboard Operations API (/api/v1/dashboard)', () => {
       },
     });
 
-    const res = await request(app)
-      .get('/api/v1/dashboard')
-      .set('Authorization', `Bearer ${devMemberToken}`);
+    try {
+      const res = await request(app)
+        .get('/api/v1/dashboard')
+        .set('Authorization', `Bearer ${devMemberToken}`);
 
-    expect(res.status).toBe(200);
-    expect(res.body.data.overdue.count).toBeGreaterThanOrEqual(1);
+      expect(res.status).toBe(200);
+      expect(res.body.data.overdue.count).toBeGreaterThanOrEqual(1);
 
-    const ids = res.body.data.overdue.items.map((i: { id: string }) => i.id);
-    expect(ids).toContain(overdueItem.id);
+      const ids = res.body.data.overdue.items.map((i: { id: string }) => i.id);
+      expect(ids).toContain(overdueItem.id);
+    } finally {
+      await prisma.workItem.delete({ where: { id: overdueItem.id } });
+    }
   });
 
   it('limits Awaiting My Approval to users holding Lead or Admin roles in that team', async () => {

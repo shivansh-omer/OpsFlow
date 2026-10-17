@@ -11,6 +11,8 @@ describe('Concurrency Engine (Atomic Claiming & Optimistic Locking)', () => {
   let devMemberToken: string;
   let juniorMemberToken: string;
   let platformLeadToken: string;
+  let incidentLeadToken: string;
+  let auditorViewerToken: string;
 
   let devMemberId: string;
   let juniorMemberId: string;
@@ -19,10 +21,12 @@ describe('Concurrency Engine (Atomic Claiming & Optimistic Locking)', () => {
     const platformTeam = await prisma.team.findUniqueOrThrow({ where: { slug: 'platform-ops' } });
     platformTeamId = platformTeam.id;
 
-    const [devMember, juniorMember, platformLead] = await Promise.all([
+    const [devMember, juniorMember, platformLead, incidentLead, auditorViewer] = await Promise.all([
       prisma.user.findUniqueOrThrow({ where: { email: 'member.dev@opsflow.io' } }),
       prisma.user.findUniqueOrThrow({ where: { email: 'member.junior@opsflow.io' } }),
       prisma.user.findUniqueOrThrow({ where: { email: 'lead.platform@opsflow.io' } }),
+      prisma.user.findUniqueOrThrow({ where: { email: 'lead.incident@opsflow.io' } }),
+      prisma.user.findUniqueOrThrow({ where: { email: 'viewer.audit@opsflow.io' } }),
     ]);
 
     devMemberId = devMember.id;
@@ -31,6 +35,8 @@ describe('Concurrency Engine (Atomic Claiming & Optimistic Locking)', () => {
     devMemberToken = generateToken({ userId: devMember.id, email: devMember.email });
     juniorMemberToken = generateToken({ userId: juniorMember.id, email: juniorMember.email });
     platformLeadToken = generateToken({ userId: platformLead.id, email: platformLead.email });
+    incidentLeadToken = generateToken({ userId: incidentLead.id, email: incidentLead.email });
+    auditorViewerToken = generateToken({ userId: auditorViewer.id, email: auditorViewer.email });
   });
 
   afterAll(async () => {
@@ -108,6 +114,50 @@ describe('Concurrency Engine (Atomic Claiming & Optimistic Locking)', () => {
 
       expect(res.status).toBe(409);
       expect(res.body.error.message).toContain('already been claimed');
+    });
+
+    it('denies claiming with 403 Forbidden when user belongs to an unauthorized team (cross-team IDOR)', async () => {
+      // Create an unassigned item in platform-ops
+      const item = await prisma.workItem.create({
+        data: {
+          title: 'Unassigned item in platform-ops',
+          description: 'Testing cross-team claim blocking',
+          status: WorkItemStatus.OPEN,
+          teamId: platformTeamId,
+          creatorId: devMemberId,
+          version: 1,
+        },
+      });
+
+      // incidentLead belongs ONLY to incident-response, NOT platform-ops
+      const res = await request(app)
+        .post(`/api/v1/work-items/${item.id}/claim`)
+        .set('Authorization', `Bearer ${incidentLeadToken}`)
+        .send();
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.message).toContain('do not have access to work items in this team');
+    });
+
+    it('denies claiming with 403 Forbidden when user has VIEWER role in the team', async () => {
+      const item = await prisma.workItem.create({
+        data: {
+          title: 'Unassigned item for viewer check',
+          description: 'Viewers cannot claim items',
+          status: WorkItemStatus.OPEN,
+          teamId: platformTeamId,
+          creatorId: devMemberId,
+          version: 1,
+        },
+      });
+
+      const res = await request(app)
+        .post(`/api/v1/work-items/${item.id}/claim`)
+        .set('Authorization', `Bearer ${auditorViewerToken}`)
+        .send();
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.message).toContain('Viewers cannot claim work items');
     });
   });
 
