@@ -180,4 +180,81 @@ describe('WorkItemDetailPage Component', () => {
     // Approve button should NOT be available to self-approve
     expect(screen.queryByRole('button', { name: /approve & resolve/i })).not.toBeInTheDocument();
   });
+
+  it('renders rejection reason when string is present in activity metadata and ignores non-string or missing reasons', async () => {
+    vi.spyOn(api, 'getWorkItemActivity').mockResolvedValue({
+      activities: [
+        {
+          id: 'act-valid',
+          workItemId: 'item-200',
+          actorId: 'u-1',
+          action: 'REJECTED' as any,
+          oldValue: 'AWAITING_APPROVAL',
+          newValue: 'IN_PROGRESS',
+          metadata: { reason: 'Stage brokers failed canary checks' },
+          createdAt: new Date().toISOString(),
+          actor: { id: 'u-1', name: 'Alex Morgan', email: 'admin@opsflow.io', avatarUrl: null },
+        },
+        {
+          id: 'act-number-reason',
+          workItemId: 'item-200',
+          actorId: 'u-1',
+          action: 'UPDATED' as any,
+          oldValue: null,
+          newValue: null,
+          metadata: { reason: 404 } as any, // numeric reason
+          createdAt: new Date().toISOString(),
+          actor: { id: 'u-1', name: 'Alex Morgan', email: 'admin@opsflow.io', avatarUrl: null },
+        },
+        {
+          id: 'act-null-meta',
+          workItemId: 'item-200',
+          actorId: 'u-1',
+          action: 'UPDATED' as any,
+          oldValue: null,
+          newValue: null,
+          metadata: null, // null metadata
+          createdAt: new Date().toISOString(),
+          actor: { id: 'u-1', name: 'Alex Morgan', email: 'admin@opsflow.io', avatarUrl: null },
+        },
+        {
+          id: 'act-missing-reason',
+          workItemId: 'item-200',
+          actorId: 'u-1',
+          action: 'UPDATED' as any,
+          oldValue: null,
+          newValue: null,
+          metadata: { otherField: 'no reason here' }, // missing reason property
+          createdAt: new Date().toISOString(),
+          actor: { id: 'u-1', name: 'Alex Morgan', email: 'admin@opsflow.io', avatarUrl: null },
+        },
+        {
+          id: 'act-whitespace-reason',
+          workItemId: 'item-200',
+          actorId: 'u-1',
+          action: 'UPDATED' as any,
+          oldValue: null,
+          newValue: null,
+          metadata: { reason: '     ' }, // whitespace-only reason
+          createdAt: new Date().toISOString(),
+          actor: { id: 'u-1', name: 'Alex Morgan', email: 'admin@opsflow.io', avatarUrl: null },
+        },
+      ],
+      pagination: { page: 1, limit: 10, totalItems: 5, totalPages: 1 },
+    });
+
+    renderDetailPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Reason: "Stage brokers failed canary checks"')).toBeInTheDocument();
+    });
+
+    // Ensure valid reason appears exactly once
+    expect(screen.getAllByText(/Stage brokers failed canary checks/i)).toHaveLength(1);
+
+    // Ensure numeric, missing, and whitespace reasons are NOT rendered
+    expect(screen.queryByText(/Reason: "404"/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Reason: ""/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no reason here/i)).not.toBeInTheDocument();
+  });
 });

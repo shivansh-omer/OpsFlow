@@ -99,6 +99,102 @@ describe('Concurrency Engine (Atomic Claiming & Optimistic Locking)', () => {
       });
       expect(claimLogs.length).toBe(1);
       expect(claimLogs[0].actorId).toBe(dbItem.assigneeId);
+      expect(claimLogs[0].oldValue).toBe(WorkItemStatus.OPEN);
+      expect((claimLogs[0].metadata as Record<string, unknown>).previousStatus).toBe(WorkItemStatus.OPEN);
+      expect((claimLogs[0].metadata as Record<string, unknown>).newStatus).toBe(WorkItemStatus.IN_PROGRESS);
+    });
+
+    it('accurately records previousStatus when claiming an unassigned item already in IN_PROGRESS status', async () => {
+      // Create an unassigned item in IN_PROGRESS status
+      const item = await prisma.workItem.create({
+        data: {
+          title: 'Unassigned In-Progress Triage Ticket',
+          description: 'Item started by triage automation but unassigned.',
+          status: WorkItemStatus.IN_PROGRESS,
+          teamId: platformTeamId,
+          creatorId: devMemberId,
+          assigneeId: null,
+          version: 1,
+        },
+      });
+
+      const res = await request(app)
+        .post(`/api/v1/work-items/${item.id}/claim`)
+        .set('Authorization', `Bearer ${devMemberToken}`)
+        .send({ version: 1 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.workItem.assigneeId).toBe(devMemberId);
+      expect(res.body.data.workItem.version).toBe(2);
+
+      // Verify activity log accurately records previousStatus as IN_PROGRESS
+      const claimLog = await prisma.activityLog.findFirstOrThrow({
+        where: { workItemId: item.id, action: ActivityAction.CLAIMED },
+      });
+      expect(claimLog.oldValue).toBe(WorkItemStatus.IN_PROGRESS);
+      expect((claimLog.metadata as Record<string, unknown>).previousStatus).toBe(WorkItemStatus.IN_PROGRESS);
+      expect((claimLog.metadata as Record<string, unknown>).newStatus).toBe(WorkItemStatus.IN_PROGRESS);
+    });
+
+    it('returns 409 Conflict and creates no activity log when claiming with an outdated version', async () => {
+      const item = await prisma.workItem.create({
+        data: {
+          title: 'Outdated Version Claim Test',
+          description: 'Item is at version 2',
+          status: WorkItemStatus.OPEN,
+          teamId: platformTeamId,
+          creatorId: devMemberId,
+          assigneeId: null,
+          version: 2,
+        },
+      });
+
+      const res = await request(app)
+        .post(`/api/v1/work-items/${item.id}/claim`)
+        .set('Authorization', `Bearer ${devMemberToken}`)
+        .send({ version: 1 });
+
+      expect(res.status).toBe(409);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.message).toContain('version mismatch');
+
+      const dbItem = await prisma.workItem.findUniqueOrThrow({ where: { id: item.id } });
+      expect(dbItem.version).toBe(2);
+      expect(dbItem.assigneeId).toBeNull();
+
+      const claimLogs = await prisma.activityLog.findMany({
+        where: { workItemId: item.id, action: ActivityAction.CLAIMED },
+      });
+      expect(claimLogs.length).toBe(0);
+    });
+
+    it('returns 409 Conflict when attempting to claim an unassigned item in an invalid status (e.g. RESOLVED)', async () => {
+      const item = await prisma.workItem.create({
+        data: {
+          title: 'Resolved Item Claim Test',
+          description: 'Cannot claim a resolved item',
+          status: WorkItemStatus.RESOLVED,
+          teamId: platformTeamId,
+          creatorId: devMemberId,
+          assigneeId: null,
+          version: 1,
+        },
+      });
+
+      const res = await request(app)
+        .post(`/api/v1/work-items/${item.id}/claim`)
+        .set('Authorization', `Bearer ${devMemberToken}`)
+        .send({ version: 1 });
+
+      expect(res.status).toBe(409);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.message).toContain('cannot be claimed in its current status');
+
+      const claimLogs = await prisma.activityLog.findMany({
+        where: { workItemId: item.id, action: ActivityAction.CLAIMED },
+      });
+      expect(claimLogs.length).toBe(0);
     });
 
     it('returns 409 Conflict when attempting to claim an already assigned item', async () => {

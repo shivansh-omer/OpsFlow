@@ -41,6 +41,14 @@ import { PriorityBadge } from '../components/common/PriorityBadge';
 import { TypeBadge } from '../components/common/TypeBadge';
 import { TransitionModal } from '../components/work-items/TransitionModal';
 
+function getRejectionReason(metadata: Record<string, unknown> | null | undefined): string | null {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return null;
+  }
+  const reason = metadata['reason'];
+  return typeof reason === 'string' && reason.trim().length > 0 ? reason : null;
+}
+
 export const WorkItemDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -892,11 +900,14 @@ export const WorkItemDetailPage: React.FC = () => {
                           → {act.newValue}
                         </div>
                       )}
-                      {act.metadata && typeof (act.metadata as any).reason === 'string' && (
-                        <div style={{ color: '#f87171', fontSize: '0.75rem', marginTop: '2px', fontStyle: 'italic' }}>
-                          Reason: "{(act.metadata as any).reason}"
-                        </div>
-                      )}
+                      {(() => {
+                        const reason = getRejectionReason(act.metadata);
+                        return reason ? (
+                          <div style={{ color: '#f87171', fontSize: '0.75rem', marginTop: '2px', fontStyle: 'italic' }}>
+                            Reason: "{reason}"
+                          </div>
+                        ) : null;
+                      })()}
                       <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                         {new Date(act.createdAt).toLocaleString()}
                       </div>

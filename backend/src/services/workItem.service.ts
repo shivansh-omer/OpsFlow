@@ -485,12 +485,40 @@ export class WorkItemService {
 
     // Atomic conditional update ensuring assigneeId is null
     return prisma.$transaction(async (tx) => {
+      // 1. Concurrency-safe pre-read inside transaction to capture actual pre-claim status
+      const before = await tx.workItem.findUnique({
+        where: { id },
+        select: { id: true, status: true, assigneeId: true, version: true },
+      });
+
+      if (!before) {
+        throw ApiError.notFound('Work item not found');
+      }
+
+      if (before.assigneeId !== null) {
+        throw ApiError.conflict('Work item has already been claimed by another user');
+      }
+
+      if (clientVersion !== undefined && before.version !== clientVersion) {
+        throw ApiError.conflict(
+          `Conflict: Work item version mismatch. Expected version ${clientVersion}, current version is ${before.version}.`
+        );
+      }
+
+      if (
+        before.status !== WorkItemStatus.OPEN &&
+        before.status !== WorkItemStatus.IN_PROGRESS
+      ) {
+        throw ApiError.conflict('Work item cannot be claimed in its current status');
+      }
+
+      // 2. Conditional update matching version and assigneeId: null
       const result = await tx.workItem.updateMany({
         where: {
           id,
           assigneeId: null,
+          version: before.version,
           status: { in: [WorkItemStatus.OPEN, WorkItemStatus.IN_PROGRESS] },
-          ...(clientVersion !== undefined ? { version: clientVersion } : {}),
         },
         data: {
           assigneeId: userId,
@@ -510,19 +538,24 @@ export class WorkItemService {
             `Conflict: Work item version mismatch. Expected version ${clientVersion}, current version is ${current.version}.`
           );
         }
+        if (current.version !== before.version) {
+          throw ApiError.conflict(
+            `Conflict: Work item was modified by another operation. Expected version ${before.version}, current version is ${current.version}.`
+          );
+        }
         throw ApiError.conflict('Work item cannot be claimed in its current status');
       }
 
-      // Record Activity Log
+      // 3. Record Activity Log with actual previous status
       await tx.activityLog.create({
         data: {
           workItemId: id,
           actorId: userId,
           action: ActivityAction.CLAIMED,
-          oldValue: null,
+          oldValue: before.status,
           newValue: userId,
           metadata: {
-            previousStatus: WorkItemStatus.OPEN,
+            previousStatus: before.status,
             newStatus: WorkItemStatus.IN_PROGRESS,
           },
         },

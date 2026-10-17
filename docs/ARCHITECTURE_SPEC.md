@@ -17,9 +17,10 @@
     "exp": 1729178800
   }
   ```
-- **Security Properties**:
-  - **Stateless & Scalable**: Decoupled from server memory sessions; validated on every request.
-  - **CSRF Immunity**: Modern browsers do not automatically attach the `Authorization` header on cross-site requests, protecting against Cross-Site Request Forgery (CSRF) without requiring CSRF synchronizer tokens.
+- **Security Properties & Trade-offs**:
+  - **Stateless & Scalable**: Decoupled from server memory sessions; validated cryptographically on every request.
+  - **CSRF Risk Mitigation**: Because authentication requires explicit injection of the `Authorization: Bearer <token>` header, standard cross-origin form submissions and ambient browser credential attacks cannot trigger authenticated state-changing actions. However, bearer tokens held in client storage are vulnerable if an Cross-Site Scripting (XSS) vulnerability exists.
+  - **Client Storage Trade-off**: Storing tokens in `sessionStorage` confines credentials to the current tab session and automatically discards them upon tab closure (unlike `localStorage`), preventing long-term credential leakage. The application mitigates XSS risks by enforcing strict Zod schema validation on all inputs, banning `dangerouslySetInnerHTML`, and relying on React's automatic string escaping.
   - **No Client Trust**: Client never supplies user roles or permissions in headers or payloads. The backend extracts `userId` from the verified JWT and evaluates active `TeamMember` roles from PostgreSQL for every operation.
 - **Client Storage & Lifecycle**:
   - Maintained in-memory inside React `AuthContext` for active runtime state.
@@ -76,19 +77,19 @@ model IdempotencyRecord {
 
 ## 3. Workflow State Machine & Permitted Transitions
 
-### Permitted Transition Matrix
-| Source Status | Permitted Target Status | Permitted Roles | Required Conditions |
-|:---|:---|:---|:---|
-| `OPEN` | `IN_PROGRESS` | Member, Lead, Admin | Must assign a valid team member (or self-assign via Claim). |
-| `IN_PROGRESS` | `AWAITING_APPROVAL`| Member (Assignee), Lead, Admin | Ready for review; records verification notes. |
-| `IN_PROGRESS` | `RESOLVED` | Lead, Admin | Direct resolution for tasks not requiring formal gatekeeper sign-off. |
-| `AWAITING_APPROVAL` | `RESOLVED` | **Lead, Admin ONLY** | **Gatekeeper Approval**. Validated on backend. |
-| `AWAITING_APPROVAL` | `IN_PROGRESS` | **Lead, Admin ONLY** | **Gatekeeper Rejection**. Requires rejection reason in comment/metadata. |
-| `RESOLVED` | `CLOSED` | Creator, Lead, Admin | Final verification; permanently closes ticket. |
-| `RESOLVED` | `IN_PROGRESS` | Member, Lead, Admin | Reopens ticket if issue recurs or regression detected. |
-| `OPEN` / `IN_PROGRESS`| `CLOSED` | Lead, Admin | Cancellation of obsolete or duplicate items. |
+OpsFlow enforces an explicit lifecycle state machine. All state mutations must be executed through `POST /api/v1/work-items/:id/transitions` and validate both the caller's role and the current item version.
 
-*Any other transition (e.g. `OPEN → RESOLVED` or `AWAITING_APPROVAL → RESOLVED` by a Viewer or Member) is strictly rejected with `422 Unprocessable Entity` or `403 Forbidden`.*
+### Permitted Transition Matrix
+| Action | Source Status | Target Status | Permitted Roles | Required Conditions & Invariants |
+|:---|:---|:---|:---|:---|
+| `START_PROGRESS` | `OPEN` | `IN_PROGRESS` | Member, Lead, Admin | Assignee must be set (or item claimed first). |
+| `SUBMIT_FOR_APPROVAL` | `IN_PROGRESS` | `AWAITING_APPROVAL` | Member (Assignee), Lead, Admin | Non-assignee members are blocked (`403 Forbidden`). |
+| `APPROVE` | `AWAITING_APPROVAL` | `RESOLVED` | **Lead, Admin ONLY** | **Separation of Duties**: Approver cannot be the designated assignee (`assigneeId !== userId`). |
+| `REJECT` | `AWAITING_APPROVAL` | `IN_PROGRESS` | **Lead, Admin ONLY** | **Gatekeeper Rejection**: Requires rejection `reason` (minimum 3 characters) recorded in audit metadata. |
+| `CLOSE` | `RESOLVED` | `CLOSED` | Lead, Admin | Final verification; permanently closes resolved ticket. |
+| `CANCEL` | `OPEN` | `CLOSED` | Lead, Admin | Cancellation of obsolete or invalid items; requires `reason` ($\ge 3$ characters). |
+
+*All other transitions (e.g. `OPEN → RESOLVED`, `IN_PROGRESS → RESOLVED`, `RESOLVED → IN_PROGRESS`, or any mutation by a `VIEWER`) are strictly prohibited and return `409 Conflict` or `403 Forbidden`.*
 
 ---
 
@@ -106,9 +107,9 @@ If any step fails or another transaction increments the `version` first, the ent
 ```sql
 UPDATE work_items
 SET "assigneeId" = $userId, "status" = 'IN_PROGRESS', "version" = "version" + 1, "updatedAt" = NOW()
-WHERE "id" = $id AND "assigneeId" IS NULL AND "version" = $expectedVersion;
+WHERE "id" = $id AND "assigneeId" IS NULL AND "version" = $expectedVersion AND "status" IN ('OPEN', 'IN_PROGRESS');
 ```
-If affected rows count is 0, the backend immediately returns `409 Conflict` ("Task has already been claimed or modified").
+Both the conditional atomic update and the `ActivityLog` creation execute inside the exact same `prisma.$transaction`. If affected rows count is 0, the backend immediately rolls back and returns `409 Conflict` without creating any activity log.
 
 ---
 
