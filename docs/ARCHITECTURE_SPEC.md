@@ -278,4 +278,44 @@ If affected rows count is 0, the backend immediately returns `409 Conflict` ("Ta
 - **Ordering**: Chronological (`createdAt: ASC`).
 - **Access Control**: Team-scoped (`403 Forbidden` for non-members).
 
+---
+
+## 8. Dashboard APIs & Integrated React Frontend Architecture (Phase 5)
+
+### Dashboard Endpoint: `GET /api/v1/dashboard`
+- **Query Parameter**: `teamId` (optional UUID).
+- **Authentication**: Bearer JWT via `Authorization` header required.
+- **Authorization & IDOR Protection**:
+  - If `teamId` is supplied, the backend strictly verifies the caller's active membership in that team (`403 Forbidden` if unauthorized).
+  - If omitted, results are aggregated strictly across all teams the caller is an active member of.
+  - An Admin or Lead only receives data for teams where they hold active membership; cross-team data is never leaked.
+
+### Precise Operational Metric Definitions
+- **Total Active**: Work items where `status !== 'CLOSED'` within authorized teams.
+- **Status Distribution**: Breakdown of work items grouped by `status` (OPEN, IN_PROGRESS, AWAITING_APPROVAL, RESOLVED, CLOSED).
+- **Priority Distribution**: Breakdown of non-closed items grouped by `priority` (LOW, MEDIUM, HIGH, URGENT).
+- **Assigned to Me**: Work items where `assigneeId === caller.id` and `status !== 'CLOSED'`.
+- **Unassigned Urgent**: Work items where `assigneeId IS NULL`, `priority === 'URGENT'`, and `status !== 'CLOSED'`. Supports 1-click atomic claiming.
+- **Awaiting My Approval**: Work items in `AWAITING_APPROVAL` status belonging strictly to teams where the caller holds `LEAD` or `ADMIN` role.
+- **Overdue Work Items**: Work items where `dueDate < CURRENT_TIMESTAMP` and `status NOT IN ('RESOLVED', 'CLOSED')`.
+- **Recent System Activity**: The 10 most recent activity logs across caller's teams with actor details.
+
+### Frontend Application Architecture (React + Vite + TypeScript)
+- **Token Storage**: Strict `sessionStorage` usage (`opsflow_session_token`). Stored tokens are never written to `localStorage`. Cleared on user logout or upon receiving HTTP 401.
+- **Idempotency Protection**: When creating work items, a unique UUID is generated per logical operation. Retries of the same operation reuse the identical `Idempotency-Key` header, allowing the backend to return the cached response.
+- **Optimistic Concurrency Control (OCC)**:
+  - Every work item view tracks its `version`.
+  - Mutations submit `{ version }`.
+  - HTTP 409 Conflict triggers a prominent callout with a **"Refresh Latest Version"** button, preventing silent overwrites.
+- **Role-Aware UI**:
+  - `VIEWER`: Read-only access to items, comments, and timeline. Mutation actions (edit, claim, transition, approve) are hidden/disabled.
+  - `MEMBER`: Can create, claim unassigned items, edit assigned items, and submit for peer review.
+  - `LEAD` & `ADMIN`: Access to approval queue, approve/reject controls, and close actions.
+  - **Separation of Duties**: When a ticket is assigned to a Lead/Admin, self-approval is blocked with an explanatory warning banner.
+- **Component Design System**:
+  - Vanilla CSS design system with custom tokens (`--bg-primary`, `--bg-surface`, `--primary`, `--border-color`).
+  - High-contrast badges for statuses, priorities, and types.
+  - Responsive layout with desktop sidebar, mobile drawer, and top bar context switchers.
+
+
 

@@ -4,6 +4,7 @@ import { env } from './config/env';
 import { authRouter } from './routes/auth.routes';
 import { teamRouter } from './routes/team.routes';
 import { workItemRouter } from './routes/workItem.routes';
+import { dashboardRouter } from './routes/dashboard.routes';
 import { errorHandler } from './middleware/errorHandler';
 import { ApiError } from './utils/errors';
 
@@ -34,6 +35,7 @@ app.get('/health', (_req: Request, res: Response) => {
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/teams', teamRouter);
 app.use('/api/v1/work-items', workItemRouter);
+app.use('/api/v1/dashboard', dashboardRouter);
 
 // 404 Fallback
 app.use((_req: Request, _res: Response, next: NextFunction) => {
