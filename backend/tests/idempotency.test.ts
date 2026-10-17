@@ -36,8 +36,9 @@ describe('Idempotency Engine (/api/v1/work-items with Idempotency-Key)', () => {
 
   it('1. Repeated creation with the same key and identical payload returns original cached response and creates exactly ONE work item', async () => {
     const idempotencyKey = `idem-key-${crypto.randomUUID()}`;
+    const uniqueTitle = `Configure Automated Canary Analysis in Spinnaker ${crypto.randomUUID()}`;
     const payload = {
-      title: 'Configure Automated Canary Analysis in Spinnaker',
+      title: uniqueTitle,
       description: 'Setup Kayenta judge metric thresholds for 5% canary rollouts.',
       type: WorkItemType.TASK,
       priority: WorkItemPriority.HIGH,
@@ -115,8 +116,9 @@ describe('Idempotency Engine (/api/v1/work-items with Idempotency-Key)', () => {
 
   it('3. Handles simultaneous overlapping creation requests with the same key safely without duplicates', async () => {
     const idempotencyKey = `idem-race-${crypto.randomUUID()}`;
+    const uniqueTitle = `Simultaneous Duplicate Submission Under Pressure ${crypto.randomUUID()}`;
     const payload = {
-      title: 'Simultaneous Duplicate Submission Under Pressure',
+      title: uniqueTitle,
       description: 'Simulates network retry or double-click on form submit.',
       teamId: platformTeamId,
     };

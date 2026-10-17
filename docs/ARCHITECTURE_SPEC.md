@@ -225,3 +225,57 @@ If affected rows count is 0, the backend immediately returns `409 Conflict` ("Ta
   - If version mismatch: `"Conflict: Work item version mismatch..."`.
   - Losing concurrent claims consistently receive `409 Conflict`.
 
+---
+
+## 7. Workflow State Machine, Approvals & Activity Timeline (Implemented in Phase 4)
+
+### Permitted Workflow Actions & State Transition Rules
+
+| Action | Current Status | Target Status | Permitted Roles | Additional Conditions & Guards |
+|:---|:---|:---|:---|:---|
+| `START_PROGRESS` | `OPEN` | `IN_PROGRESS` | Member, Lead, Admin | Assignee must already be set (or item claimed). |
+| `SUBMIT_FOR_APPROVAL` | `IN_PROGRESS` | `AWAITING_APPROVAL` | Member (Assignee), Lead, Admin | Non-assignee members are blocked (`403 Forbidden`). |
+| `APPROVE` | `AWAITING_APPROVAL` | `RESOLVED` | **Lead, Admin ONLY** | **Separation of Duties**: Approver cannot be the assignee (`assigneeId !== userId`). |
+| `REJECT` | `AWAITING_APPROVAL` | `IN_PROGRESS` | **Lead, Admin ONLY** | Requires meaningful rejection `reason` (min 3 chars). |
+| `CLOSE` | `RESOLVED` | `CLOSED` | Lead, Admin | Permanently closes resolved ticket. |
+| `CANCEL` | `OPEN` | `CLOSED` | Lead, Admin | Requires cancellation `reason` (min 3 chars). |
+
+*All other transitions (e.g. `OPEN → RESOLVED`, `IN_PROGRESS → CLOSED`, `CLOSED → *`) are strictly prohibited and return `409 Conflict`.*
+
+### Dedicated Workflow Endpoints
+
+#### 1. `POST /api/v1/work-items/:id/transitions`
+- **Request Body**:
+  ```json
+  {
+    "action": "APPROVE",             // Optional if targetStatus supplied
+    "targetStatus": "RESOLVED",      // Optional if action supplied
+    "version": 3,                    // Required integer version from last read
+    "reason": "Test coverage met",   // Required for REJECT and CANCEL
+    "comment": "Optional comment"    // Atomically persisted as comment if present
+  }
+  ```
+- **Error Semantics**:
+  - `400 Bad Request`: Missing version or missing required reason for `REJECT`/`CANCEL`.
+  - `403 Forbidden`: Insufficient role, non-assignee member submitting, or Lead attempting self-approval.
+  - `409 Conflict`: Invalid state transition from current status, or OCC version mismatch (`Expected version X, current version Y`).
+  - `404 Not Found`: Work item does not exist.
+
+#### 2. `GET /api/v1/work-items/:id/activity`
+- **Query Parameters**:
+  - `page`: default 1
+  - `limit`: default 20 (max 100)
+- **Ordering**: Deterministic reverse chronological ordering (`ORDER BY createdAt DESC, id DESC`).
+- **Response**: Array of activity logs with populated `actor` (`id`, `name`, `email`, `avatarUrl`) and pagination metadata.
+- **Access Control**: Team-scoped (`403 Forbidden` for non-members).
+
+#### 3. `POST /api/v1/work-items/:id/comments`
+- **Request Body**: `{ "content": "..." }` (1–2000 characters).
+- **Behavior**: Attributed to caller, persists `COMMENTED` event in activity timeline atomically.
+- **Access Control**: Any authenticated team member (`VIEWER`, `MEMBER`, `LEAD`, `ADMIN`).
+
+#### 4. `GET /api/v1/work-items/:id/comments`
+- **Ordering**: Chronological (`createdAt: ASC`).
+- **Access Control**: Team-scoped (`403 Forbidden` for non-members).
+
+

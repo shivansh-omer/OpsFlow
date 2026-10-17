@@ -2,6 +2,9 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { WorkItemPriority, WorkItemStatus, WorkItemType } from '@prisma/client';
 import { workItemService } from '../services/workItem.service';
+import { workflowService, WorkflowAction } from '../services/workflow.service';
+import { activityService } from '../services/activity.service';
+import { commentService } from '../services/comment.service';
 import { validateIdempotencyKey } from '../utils/idempotency';
 import { ApiError } from '../utils/errors';
 
@@ -185,3 +188,122 @@ export async function claimWorkItem(
     next(error);
   }
 }
+
+export const transitionWorkItemSchema = z
+  .object({
+    action: z.nativeEnum(WorkflowAction).optional(),
+    targetStatus: z.nativeEnum(WorkItemStatus).optional(),
+    version: z.number().int().min(1, 'Current work item version is required for concurrency-safe state transition'),
+    reason: z.string().optional(),
+    comment: z.string().optional(),
+  })
+  .refine((data) => data.action !== undefined || data.targetStatus !== undefined, {
+    message: 'Either action or targetStatus must be specified for workflow transition',
+  });
+
+export const getWorkItemActivityQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const addCommentSchema = z.object({
+  content: z.string().min(1, 'Comment cannot be empty').max(2000, 'Comment exceeds maximum allowed length of 2000 characters'),
+});
+
+export async function transitionWorkItem(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user) {
+      throw ApiError.unauthorized('Authentication required');
+    }
+
+    const id = req.params.id as string;
+    const workItem = await workflowService.executeTransition(
+      id,
+      req.user.id,
+      req.body
+    );
+
+    res.status(200).json({
+      success: true,
+      data: { workItem },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getWorkItemActivity(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user) {
+      throw ApiError.unauthorized('Authentication required');
+    }
+
+    const id = req.params.id as string;
+    const { page, limit } = req.query as unknown as z.infer<typeof getWorkItemActivityQuerySchema>;
+
+    const result = await activityService.listActivities(id, req.user.id, page, limit);
+
+    res.status(200).json({
+      success: true,
+      data: result.activities,
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function addComment(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user) {
+      throw ApiError.unauthorized('Authentication required');
+    }
+
+    const id = req.params.id as string;
+    const { content } = req.body;
+
+    const comment = await commentService.addComment(id, req.user.id, content);
+
+    res.status(201).json({
+      success: true,
+      data: { comment },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getComments(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user) {
+      throw ApiError.unauthorized('Authentication required');
+    }
+
+    const id = req.params.id as string;
+    const comments = await commentService.listComments(id, req.user.id);
+
+    res.status(200).json({
+      success: true,
+      data: { comments },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+

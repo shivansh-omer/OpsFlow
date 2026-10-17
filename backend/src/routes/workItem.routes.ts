@@ -5,10 +5,17 @@ import {
   getWorkItem,
   updateWorkItem,
   claimWorkItem,
+  transitionWorkItem,
+  getWorkItemActivity,
+  addComment,
+  getComments,
   createWorkItemSchema,
   listWorkItemsQuerySchema,
   updateWorkItemSchema,
   claimWorkItemSchema,
+  transitionWorkItemSchema,
+  getWorkItemActivityQuerySchema,
+  addCommentSchema,
 } from '../controllers/workItem.controller';
 import { authenticate } from '../middleware/authenticate';
 import { validateRequest } from '../middleware/validateRequest';
@@ -32,5 +39,17 @@ router.patch('/:id', validateRequest({ body: updateWorkItemSchema }), updateWork
 
 // Atomically claim unassigned work item
 router.post('/:id/claim', validateRequest({ body: claimWorkItemSchema }), claimWorkItem);
+
+// Execute workflow state machine transition (enforces roles, self-approval guards, atomic updates)
+router.post('/:id/transitions', validateRequest({ body: transitionWorkItemSchema }), transitionWorkItem);
+
+// Retrieve append-only activity timeline for a work item
+router.get('/:id/activity', validateRequest({ query: getWorkItemActivityQuerySchema }), getWorkItemActivity);
+
+// Add a comment to a work item
+router.post('/:id/comments', validateRequest({ body: addCommentSchema }), addComment);
+
+// Retrieve comments for a work item
+router.get('/:id/comments', getComments);
 
 export const workItemRouter = router;
